@@ -138,7 +138,7 @@ void displaydraw()
   else
   {
     display1.setFont(u8g2_font_ncenB08_tr);
-    display1.drawStr(12, 14, "Failed to connect");
+    display1.drawStr(16, 14, "Failed to connect");
   }
 
   display2.setFont(u8g2_font_ncenB10_tr);
