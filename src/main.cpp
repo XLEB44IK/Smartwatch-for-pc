@@ -10,6 +10,8 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <RtcDS1302.h>
+#include <AHT10.h>
+#include <iarduino_Pressure_BMP.h>
 
 // Define the Time structure if not included in the library
 struct Time
@@ -30,10 +32,13 @@ void handleRoot();
 void updateClock();
 void syncTimeWithAPI();
 void brightnessControl();
+void tempandhum();
 
 // Объявление дисплеев
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // 128x64
-U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // 128x32
+U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // Дисплей 128x64
+U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // Дисплей 128x32
+AHT10 aht10;                                                                        // Датчик температуры и влажности
+iarduino_Pressure_BMP bmp;                                                          // Датчик давления
 
 // Габариты дисплеев
 #define DISPLAY1_WIDTH 128
@@ -200,13 +205,32 @@ void setup()
     Serial.println("Connected to WiFi");
     Serial.println(WiFi.localIP());
   }
+  // Инициализация датчика AHT10
+  if (!aht10.begin())
+  {
+    Serial.println("Не удалось инициализировать датчик AHT10!");
+    while (1)
+      ;
+  }
+  else
+  {
+    Serial.println("Датчик AHT10 инициализирован.");
+  }
+  // Инициализация датчика BMP
+  if (!bmp.begin())
+  {
+    Serial.println("Не удалось инициализировать датчик BMP!");
+  }
+  else
+  {
+    Serial.println("Датчик BMP инициализирован.");
+  }
   display1.sendBuffer();
   display2.sendBuffer();
 }
 
 void loop()
 {
-
   static unsigned long lastUpdateTime = 0;
   unsigned long currentTime = millis();
   if (currentTime - lastUpdateTime > 1000)
@@ -223,6 +247,7 @@ void loop()
     displaydraw();
     updateClock();
     brightnessControl();
+    tempandhum();
     server.handleClient();
     display1.sendBuffer();
     display2.sendBuffer();
@@ -247,7 +272,6 @@ void displaydraw()
   }
   if (millis() > 10000)
   {
-    display1.drawStr(24, DISPLAY1_HEIGHT / 2 + 4, "I`m online");
     display1.setFont(u8g2_font_unifont_t_symbols);
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -260,9 +284,10 @@ void displaydraw()
   }
 }
 // Режим точки доступа
+static bool firstTimeACP = 0;
 void accessPoint()
 {
-  static int firstTimeACP = 0;
+
   if (WiFi.status() != WL_CONNECTED && !wasConnectedToWiFi)
   {
     if (firstTimeACP == 0)
@@ -361,7 +386,7 @@ void updateClock()
   display2.setFont(u8g2_font_ncenB10_tr);
   // Формируем строку для дня недели, числа дня и месяца
   snprintf(buffer, sizeof(buffer), "%s, %02d %s", dayOfWeek, t.Day(), monthName);
-  display2.drawStr(19, 28, buffer); // День недели, дата и месяц
+  display2.drawStr(16, 28, buffer); // День недели, дата и месяц
 
   // Устанавливаем меньший шрифт для номера месяца
   display2.setFont(u8g2_font_5x7_tr);                    // Меньший шрифт для числа месяца
@@ -441,4 +466,49 @@ void brightnessControl()
   // Serial.print(brightness1);
   // Serial.print(", Brightness2: ");
   // Serial.println(brightness2);
+}
+
+void tempandhum()
+{
+  float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
+  float humidity = aht10.readHumidity();       // Read humidity from AHT10 sensor
+  float pressure = bmp.pressure;
+  temperature = bmp.temperature;
+  if (millis() > 10000 && firstTimeACP == 0)
+  {
+    // Calculate average temperature from AHT10 and BMP sensors
+    float avgTemperature = aht10.readTemperature();
+
+    // Prepare strings for display
+    char tempStr[10];
+    char humStr[10];
+    char pressureStr[10];
+    snprintf(tempStr, sizeof(tempStr), "%.1f", avgTemperature);
+    snprintf(humStr, sizeof(humStr), "%.1f", humidity);
+    snprintf(pressureStr, sizeof(pressureStr), "%.1f", pressure); // Convert pressure to hPa
+
+    // Display temperature, humidity, and pressure with labels
+    display1.setFont(u8g2_font_ncenB08_tr);
+    // Display temperature
+    display1.drawStr(0, 10, "Temp:");
+    int tempWidth = display1.getStrWidth(tempStr); // Вычисляем ширину строки с температурой
+    display1.drawStr(40, 10, tempStr);             // Температура
+    display1.setFont(u8g2_font_unifont_t_symbols);
+    display1.drawUTF8(40 + tempWidth + 1, 10, "\u00B0"); // Добавляем символ градуса "°"
+    display1.setFont(u8g2_font_ncenB08_tr);
+    display1.drawStr(40 + tempWidth + 6, 10, "C"); // Добавляем букву "C" рядом с градусом
+    // Display humidity
+    display1.setFont(u8g2_font_ncenB08_tr);
+    display1.drawStr(0, 26, "Hum:");
+    int humWidth = display1.getStrWidth(humStr); // Вычисляем ширину строки с влажностью
+    display1.drawStr(40, 26, humStr);            // Влажность
+    display1.setFont(u8g2_font_unifont_t_symbols);
+    display1.drawUTF8(40 + humWidth + 1, 26, "\u0025"); // Добавляем символ процента "%"
+    // Display pressure
+    display1.setFont(u8g2_font_ncenB08_tr);
+    display1.drawStr(0, 42, "Pres:");
+    int pressureWidth = display1.getStrWidth(pressureStr); // Вычисляем ширину строки с давлением
+    display1.drawStr(40, 42, pressureStr);                 // Давление
+    display1.drawStr(40 + pressureWidth + 1, 42, "hPa");   // Добавляем единицу измерения давления "hPa"
+  }
 }
