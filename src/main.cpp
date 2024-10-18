@@ -25,16 +25,20 @@ struct Time
 };
 
 // Объявление функций
-void displaydraw();
-void accessPoint();
-void handleSubmit();
-void handleRoot();
-void updateClock();
-void syncTimeWithAPI();
-void brightnessControl();
-void tempandhum();
+void displaydraw();       // Функция отрисовки дисплея
+void accessPoint();       // Функция создания точки доступа
+void handleSubmit();      // Обработчик для маршрута /submit
+void handleRoot();        // Обработчик для главной страницы
+void updateClock();       // Функция обновления времени
+void syncTimeWithAPI();   // Функция синхронизации времени с API
+void brightnessControl(); // Функция управления яркостью дисплеев
+void tempandhum();        // Функция получения температуры и влажности
+void weather();           // Функция получения погоды
+String weatherjsonget();  // Функция получения погоды в формате JSON
+void displayWeather();    // Функция отображения погоды на дисплее
+String line;              // Переменная для хранения строки
 
-// Объявление дисплеев
+// Объявление дисплеев и датчиков
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // Дисплей 128x64
 U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // Дисплей 128x32
 AHT10 aht10;                                                                        // Датчик температуры и влажности
@@ -59,10 +63,19 @@ const char *ap_ssid = "ESP8266";
 const char *ap_password = "12345679";
 bool wasConnectedToWiFi = false;
 
+// Данные для подключения к интернету
 ESP8266WebServer server(80);
-// Настройки NTP
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // 0 - смещение по времени (в секундах), 60000 - интервал обновления (в миллисекундах)
+
+// Переменные для хранения API ключа
+String TimeApi = "http://worldtimeapi.org/api/timezone/Europe/Kyiv";                                                                               // API для получения времени
+String WeatherApi = "https://api.openweathermap.org/data/2.5/weather?lat=47.8167&lon=35.1833&appid=866e605f79b725999251f811029f92a7&units=metric"; // API для получения погоды
+String WeatherApiKey = "866e605f79b725999251f811029f92a7";
+String Cityid = "687700";
+String CityLat = "47.8167";
+String CityLon = "35.1833";
+String TelegramApi = "https://api.telegram.org/bot7433204078:AAEi1i7-Sue-nxhNLpLlZEclmIvO-UjcBG8"; // API для отправки сообщений в Telegram
 
 // Обработчик для главной страницы
 void handleRoot()
@@ -233,7 +246,7 @@ void loop()
 {
   static unsigned long lastUpdateTime = 0;
   unsigned long currentTime = millis();
-  if (currentTime - lastUpdateTime > 1000)
+  if (currentTime - lastUpdateTime > 500)
   {
     // Проверка состояния Wi-Fi и обновление переменной wasConnectedToWiFi
     if (WiFi.status() == WL_CONNECTED)
@@ -248,6 +261,8 @@ void loop()
     updateClock();
     brightnessControl();
     tempandhum();
+    weather();
+    displayWeather();
     server.handleClient();
     display1.sendBuffer();
     display2.sendBuffer();
@@ -257,7 +272,7 @@ void loop()
 void displaydraw()
 {
   display1.setFont(u8g2_font_ncenB08_tr);
-  if (WiFi.status() == WL_CONNECTED && millis() < 10000)
+  if (WiFi.status() == WL_CONNECTED && millis() < 9500)
   {
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -401,7 +416,7 @@ void syncTimeWithAPI()
   WiFiClient client;
 
   // Запрос времени с API
-  http.begin(client, "http://worldtimeapi.org/api/timezone/Europe/Kyiv");
+  http.begin(client, TimeApi);
   int httpCode = http.GET();
 
   // Если ответ успешен
@@ -468,6 +483,7 @@ void brightnessControl()
   // Serial.println(brightness2);
 }
 
+// Обработка и отображение температуры, влажности и давления
 void tempandhum()
 {
   float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
@@ -490,25 +506,101 @@ void tempandhum()
     // Display temperature, humidity, and pressure with labels
     display1.setFont(u8g2_font_ncenB08_tr);
     // Display temperature
-    display1.drawStr(0, 10, "Temp:");
+    display1.drawStr(0, 42, "Temp:");
     int tempWidth = display1.getStrWidth(tempStr); // Вычисляем ширину строки с температурой
-    display1.drawStr(40, 10, tempStr);             // Температура
+    display1.drawStr(40, 42, tempStr);             // Температура
     display1.setFont(u8g2_font_unifont_t_symbols);
-    display1.drawUTF8(40 + tempWidth + 1, 10, "\u00B0"); // Добавляем символ градуса "°"
+    display1.drawUTF8(72 + tempWidth + 1, 42, "\u00B0"); // Добавляем символ градуса "°"
     display1.setFont(u8g2_font_ncenB08_tr);
-    display1.drawStr(40 + tempWidth + 6, 10, "C"); // Добавляем букву "C" рядом с градусом
+    display1.drawStr(76 + tempWidth + 6, 42, "C"); // Добавляем букву "C" рядом с градусом
     // Display humidity
     display1.setFont(u8g2_font_ncenB08_tr);
     display1.drawStr(0, 26, "Hum:");
     int humWidth = display1.getStrWidth(humStr); // Вычисляем ширину строки с влажностью
     display1.drawStr(40, 26, humStr);            // Влажность
     display1.setFont(u8g2_font_unifont_t_symbols);
-    display1.drawUTF8(40 + humWidth + 1, 26, "\u0025"); // Добавляем символ процента "%"
+    display1.drawUTF8(44 + humWidth + 1, 26, "\u0025"); // Добавляем символ процента "%"
     // Display pressure
     display1.setFont(u8g2_font_ncenB08_tr);
-    display1.drawStr(0, 42, "Pres:");
+    display1.drawStr(0, 10, "Pres:");
     int pressureWidth = display1.getStrWidth(pressureStr); // Вычисляем ширину строки с давлением
-    display1.drawStr(40, 42, pressureStr);                 // Давление
-    display1.drawStr(40 + pressureWidth + 1, 42, "hPa");   // Добавляем единицу измерения давления "hPa"
+    display1.drawStr(40, 10, pressureStr);                 // Давление
+    display1.drawStr(44 + pressureWidth + 1, 10, "hPa");   // Добавляем единицу измерения давления "hPa"
+  }
+}
+
+// Получение погоды
+void weather()
+{
+  DynamicJsonDocument doc(2000);                           /// буфер на 2000 символов
+  String line = weatherjsonget();                          // объявляем переменную line и получаем результат из функции weatherjsonget
+  DeserializationError error = deserializeJson(doc, line); // скармиваем String
+  if (error)
+  {
+    Serial.println("deserializeJson() failed"); // если ошибка, сообщаем об этом
+    return;                                     // и запускаем заного
+  }
+}
+String weatherjsonget()
+{
+  static unsigned long lastWeatherUpdateTime = 0;
+  unsigned long currentTime = millis();
+
+  // Check if 10 seconds have passed since the controller started or if a minute has passed since the last update
+  if ((currentTime > 10000 && lastWeatherUpdateTime == 0) || (currentTime - lastWeatherUpdateTime >= 30000))
+  {
+    const char *host = "api.openweathermap.org"; // Declare the host
+    const int httpPort = 80;                     // Declare and initialize the httpPort variable
+    // Use WiFiClient class to create TCP connections
+    WiFiClient client;
+    if (!client.connect(host, httpPort))
+    {
+      Serial.println("connection failed");
+      return "";
+    }
+
+    client.println("GET /data/2.5/weather?id=687700&appid=866e605f79b725999251f811029f92a7 HTTP/1.1");
+    client.println("Host: api.openweathermap.org");
+    client.println("Connection: close");
+    client.println();
+
+    delay(1500);
+    // Read all the lines of the reply from server and print them to Serial
+    while (client.available())
+    {
+      line = client.readStringUntil('\r');
+    }
+    // Serial.print(line);
+    // Serial.println();
+    // Serial.println("closing connection");
+
+    // Update the last weather update time
+    lastWeatherUpdateTime = currentTime;
+  }
+  return line;
+}
+
+// Вывод погоды на дисплей
+void displayWeather()
+{
+  // Парсим JSON-данные
+  DynamicJsonDocument doc(2000);                           // Создаем JSON-документ
+  DeserializationError error = deserializeJson(doc, line); // Десериализуем JSON
+  if (error)
+  {
+    Serial.println("Failed to parse JSON");
+    return;
+  }
+
+  // Получаем данные о погоде
+  float temperature = doc["main"]["temp"];    // Температура
+  String weather = doc["weather"][0]["main"]; // Описание погоды
+
+  if (millis() > 10000 && firstTimeACP == 0)
+  {
+    // Отображаем данные о погоде на дисплее
+    display1.setFont(u8g2_font_ncenB08_tr);
+    String tempStr = "/ " + String(temperature - 273.15, 1);
+    display1.drawStr(64, 42, tempStr.c_str()); // Температура
   }
 }
