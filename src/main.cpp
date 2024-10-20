@@ -50,6 +50,10 @@ iarduino_Pressure_BMP bmp;                                                      
 #define DISPLAY2_WIDTH 128
 #define DISPLAY2_HEIGHT 32
 
+// Пины для подключения кнопок
+const int button1 = 0;  //D3
+const int button2 = 2;  //D4
+const int button3 = 14; //D5
 // Пины для подключения DS1302
 const int RST_PIN = 15;
 const int DAT_PIN = 13;
@@ -324,9 +328,29 @@ void accessPoint()
     }
 
     display1.setFont(u8g2_font_ncenB08_tr);
-    display1.drawStr(8, 36, "Access Point started");
+    display1.drawStr(8, 12, "Access Point started");
     display1.setFont(u8g2_font_ncenB12_tr);
-    display1.drawStr(4, 56, WiFi.softAPIP().toString().c_str());
+    display1.drawStr(4, 28, WiFi.softAPIP().toString().c_str());
+    // Обновляем позицию текста
+    /// Объявляем позицию текста как int для точности при движении
+    static int textPosX1 = 12; // Начальная позиция текста
+    const char *scrollText = "Press any button to continue"; // Текст бегущей строки
+    int textWidth = display1.getStrWidth(scrollText);        // Ширина текста
+    int spacing = 64;                                        // Устанавливаем расстояние между строками (меньше текстового пространства)
+    // Обновляем позицию для бегущей строки
+    textPosX1 -= 8; // Скорость движения текста
+    // Если первая строка полностью ушла за левый край экрана
+    if (textPosX1 < -textWidth)
+    {
+      textPosX1 += textWidth - spacing; // Смещаем её за вторую строку с учётом уменьшенного расстояния
+    }
+    // Устанавливаем шрифт
+    display1.setFont(u8g2_font_ncenB08_tr);
+    // Рисуем первую строку на экране
+    display1.drawStr(textPosX1, 48, scrollText);
+    // Рисуем вторую строку сразу после первой, с уменьшенным расстоянием между ними
+    display1.drawStr(textPosX1 + textWidth - spacing, 48, scrollText);
+
     display2.setFont(u8g2_font_ncenB08_tr);
     display2.drawStr(0, 10, "Connect to WiFi");
     display2.drawStr(0, 20, ("SSID: " + String(ap_ssid)).c_str());
@@ -380,6 +404,11 @@ void updateClock()
       syncTimeWithAPI();          // Синхронизируем время
       lastSyncTime = currentTime; // Обновляем время последней синхронизации
     }
+  }
+  // Проверяем, не включен ли режим точки доступа
+  if (WiFi.getMode() == WIFI_AP)
+  {
+    return; // Если включен режим точки доступа, не выводим время
   }
   // Получаем текущее время с RTC модуля
   RtcDateTime t = rtc.GetDateTime();
@@ -474,13 +503,6 @@ void brightnessControl()
 
   display1.setContrast(brightness1);
   display2.setContrast(brightness2);
-
-  // Serial.print("Resistance: ");
-  // Serial.print(R1);
-  // Serial.print(" Ohm, Brightness1: ");
-  // Serial.print(brightness1);
-  // Serial.print(", Brightness2: ");
-  // Serial.println(brightness2);
 }
 
 // Обработка и отображение температуры, влажности и давления
