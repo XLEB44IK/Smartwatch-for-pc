@@ -12,6 +12,7 @@
 #include <RtcDS1302.h>
 #include <AHT10.h>
 #include <iarduino_Pressure_BMP.h>
+#include "config.h"
 
 // Define the Time structure if not included in the library
 struct Time
@@ -51,9 +52,9 @@ iarduino_Pressure_BMP bmp;                                                      
 #define DISPLAY2_HEIGHT 32
 
 // Пины для подключения кнопок
-const int button1 = 0;  //D3
-const int button2 = 2;  //D4
-const int button3 = 14; //D5
+const int button1 = 0;  // D3
+const int button2 = 2;  // D4
+const int button3 = 14; // D5
 // Пины для подключения DS1302
 const int RST_PIN = 15;
 const int DAT_PIN = 13;
@@ -71,15 +72,6 @@ bool wasConnectedToWiFi = false;
 ESP8266WebServer server(80);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // 0 - смещение по времени (в секундах), 60000 - интервал обновления (в миллисекундах)
-
-// Переменные для хранения API ключа
-String TimeApi = "http://worldtimeapi.org/api/timezone/Europe/Kyiv";                                                                               // API для получения времени
-String WeatherApi = "https://api.openweathermap.org/data/2.5/weather?lat=47.8167&lon=35.1833&appid=866e605f79b725999251f811029f92a7&units=metric"; // API для получения погоды
-String WeatherApiKey = "866e605f79b725999251f811029f92a7";
-String Cityid = "687700";
-String CityLat = "47.8167";
-String CityLon = "35.1833";
-String TelegramApi = "https://api.telegram.org/bot7433204078:AAEi1i7-Sue-nxhNLpLlZEclmIvO-UjcBG8"; // API для отправки сообщений в Telegram
 
 // Обработчик для главной страницы
 void handleRoot()
@@ -333,7 +325,7 @@ void accessPoint()
     display1.drawStr(4, 28, WiFi.softAPIP().toString().c_str());
     // Обновляем позицию текста
     /// Объявляем позицию текста как int для точности при движении
-    static int textPosX1 = 12; // Начальная позиция текста
+    static int textPosX1 = 12;                               // Начальная позиция текста
     const char *scrollText = "Press any button to continue"; // Текст бегущей строки
     int textWidth = display1.getStrWidth(scrollText);        // Ширина текста
     int spacing = 64;                                        // Устанавливаем расстояние между строками (меньше текстового пространства)
@@ -581,7 +573,8 @@ String weatherjsonget()
       return "";
     }
 
-    client.println("GET /data/2.5/weather?id=687700&appid=866e605f79b725999251f811029f92a7 HTTP/1.1");
+    String url = String("/data/2.5/weather?id=") + Cityid + "&appid=" + WeatherApiKey;
+    client.println("GET " + url + " HTTP/1.1");
     client.println("Host: api.openweathermap.org");
     client.println("Connection: close");
     client.println();
