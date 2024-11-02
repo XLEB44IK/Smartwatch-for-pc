@@ -12,6 +12,7 @@
 #include <RtcDS1302.h>
 #include <AHT10.h>
 #include <iarduino_Pressure_BMP.h>
+#include <UniversalTelegramBot.h>
 #include "config.h"
 
 // Define the Time structure if not included in the library
@@ -39,12 +40,16 @@ String weatherjsonget();     // Функция получения погоды �
 void displayWeather();       // Функция отображения погоды на дисплее
 String line;                 // Переменная для хранения строки
 void accesspointcondition(); // Функция для проверки условия для включения точки доступа
+void startTelegramBot();     // Функция для запуска бота
+void handleNewMessages(int numNewMessages);
 
 // Объявление дисплеев и датчиков
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // Дисплей 128x64
 U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // Дисплей 128x32
 AHT10 aht10;                                                                        // Датчик температуры и влажности
 iarduino_Pressure_BMP bmp;                                                          // Датчик давления
+WiFiClientSecure secured_client;
+UniversalTelegramBot bot(BOT_TOKEN, secured_client); // Бот для отправки сообщений в Telegram
 
 // Габариты дисплеев
 #define DISPLAY1_WIDTH 128
@@ -68,6 +73,7 @@ RtcDS1302<ThreeWire> rtc(myWire);
 const char *ap_ssid = "ESP8266";
 const char *ap_password = "12345679";
 static bool workingACP = 0;
+unsigned long lastTimeBotRan;
 
 // Данные для подключения к интернету
 ESP8266WebServer server(80);
@@ -151,7 +157,68 @@ void handleSubmit()
 IPAddress local_IP(192, 168, 0, 105);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
+X509List cert(TELEGRAM_CERTIFICATE_ROOT);
 
+// Функция старта бота
+void startTelegramBot()
+{
+  // Установка времени для TLS
+  configTime(0, 0, "pool.ntp.org");
+  secured_client.setTrustAnchors(&cert);
+
+  bot.sendMessage(CHAT_ID, "Bot is online and ready! Press /start to continue", "");
+  // Устанавливаем команды бота
+  const String commands = F("["
+                            "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
+                            "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
+                            "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
+                            "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
+                            "]");
+  bot.setMyCommands(commands); // Устанавливаем команды для бота
+}
+
+// Функция для обработки новых сообщений
+void handleNewMessages(int numNewMessages)
+{
+  for (int i = 0; i < numNewMessages; i++)
+  {
+    String chat_id = String(bot.messages[i].chat_id);
+    String text = bot.messages[i].text;
+
+    if (text == "/start")
+    {
+      String welcome = "Use the following commands:\n";
+      welcome += "/RoomStatus - Get room temperature and humidity\n";
+      welcome += "/test1 - Send PC to sleep\n";
+      welcome += "/test2 - Turn on/off\n";
+      welcome += "/test3 - Get humidity\n";
+      bot.sendMessage(chat_id, welcome, "");
+    }
+
+    if (text == "/RoomStatus")
+    {
+      float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
+      float humidity = aht10.readHumidity();       // Read humidity from AHT10 sensor
+      String roomStatus = "Room temperature: " + String(temperature, 1) + "°C\n";
+      roomStatus += "Room humidity: " + String(humidity, 1) + "%\n";
+      bot.sendMessage(chat_id, roomStatus, "");
+    }
+
+    if (text == "/test1")
+    {
+    }
+
+    if (text == "/test2")
+    {
+    }
+
+    if (text == "/test3")
+    {
+    }
+  }
+}
+
+// Стартовая функция
 void setup()
 {
   pinMode(button1, INPUT_PULLUP);
@@ -257,6 +324,7 @@ void setup()
   }
   display1.sendBuffer();
   display2.sendBuffer();
+  startTelegramBot();
 }
 
 void loop()
@@ -277,6 +345,12 @@ void loop()
     tempandhum();
     weather();
     displayWeather();
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    while (numNewMessages)
+    {
+      handleNewMessages(numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
     server.handleClient();
     display1.sendBuffer();
     display2.sendBuffer();
