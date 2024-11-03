@@ -158,6 +158,8 @@ IPAddress local_IP(192, 168, 0, 105);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 X509List cert(TELEGRAM_CERTIFICATE_ROOT);
+const String allowed_chat_ids[] = {CHAT_ID, CHAT_ID_1};
+const int num_allowed_chat_ids = sizeof(allowed_chat_ids) / sizeof(allowed_chat_ids[0]);
 
 // Функция старта бота
 void startTelegramBot()
@@ -166,7 +168,7 @@ void startTelegramBot()
   configTime(0, 0, "pool.ntp.org");
   secured_client.setTrustAnchors(&cert);
 
-  bot.sendMessage(CHAT_ID, "Bot is online and ready! Press /start to continue", "");
+  bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
   // Устанавливаем команды бота
   const String commands = F("["
                             "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
@@ -177,6 +179,17 @@ void startTelegramBot()
   bot.setMyCommands(commands); // Устанавливаем команды для бота
 }
 
+bool isChatIdAllowed(const String &chat_id)
+{
+  for (int i = 0; i < num_allowed_chat_ids; i++)
+  {
+    if (allowed_chat_ids[i] == chat_id)
+    {
+      return true;
+    }
+  }
+  return false;
+}
 // Функция для обработки новых сообщений
 void handleNewMessages(int numNewMessages)
 {
@@ -194,8 +207,7 @@ void handleNewMessages(int numNewMessages)
       welcome += "/test3 - Get humidity\n";
       bot.sendMessage(chat_id, welcome, "");
     }
-
-    if (text == "/RoomStatus")
+    else if (text == "/RoomStatus")
     {
       float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
       float humidity = aht10.readHumidity();       // Read humidity from AHT10 sensor
@@ -203,21 +215,49 @@ void handleNewMessages(int numNewMessages)
       roomStatus += "Room humidity: " + String(humidity, 1) + "%\n";
       bot.sendMessage(chat_id, roomStatus, "");
     }
-
-    if (text == "/test1")
+    else if (text == "Пинг" || text == "пинг" || text == "ПИНГ" || text == "/пинг" || text == "/Пинг" || text == "/ПИНГ"|| text =="пінг" || text =="Пінг" || text =="ПІНГ" || text =="/пінг" || text =="/Пінг" || text =="/ПІНГ")
     {
+      bot.sendMessage(chat_id, "Понг", "");
     }
-
-    if (text == "/test2")
+    else if (text == "Ping" || text == "ping" || text == "PING" || text == "/ping" || text == "/Ping" || text == "/PING")
     {
+      bot.sendMessage(chat_id, "Pong", "");
     }
-
-    if (text == "/test3")
+    else if (text == "Pong" || text == "pong" || text == "PONG" || text == "/pong" || text == "/Pong" || text == "/PONG")
     {
+      bot.sendMessage(chat_id, "Ping", "");
+    }
+    else if (text == "Понг" || text == "понг" || text == "ПОНГ" || text == "/понг" || text == "/Понг" || text == "/ПОНГ")
+    {
+      bot.sendMessage(chat_id, "Пинг", "");
+    }
+    else if (text == "/test1" || text == "/test2" || text == "/test3")
+    {
+      if (!isChatIdAllowed(chat_id))
+      {
+        bot.sendMessage(chat_id, "You are not authorized to use this command.", "");
+        continue;
+      }
+
+      if (text == "/test1")
+      {
+        bot.sendMessage(chat_id, "Just test1", "");
+      }
+      else if (text == "/test2")
+      {
+        bot.sendMessage(chat_id, "Just test2", "");
+      }
+      else if (text == "/test3")
+      {
+        bot.sendMessage(chat_id, "Just test3", "");
+      }
+    }
+    else
+    {
+      bot.sendMessage(chat_id, "Invalid command. Please use /start to see the list of available commands.", "");
     }
   }
 }
-
 // Стартовая функция
 void setup()
 {
