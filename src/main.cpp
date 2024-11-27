@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <U8g2lib.h>
-#include <U8x8lib.h>
+// #include <U8x8lib.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
@@ -13,6 +13,7 @@
 #include <AHT10.h>
 #include <iarduino_Pressure_BMP.h>
 #include <UniversalTelegramBot.h>
+#include <ButtonManager.h>
 #include "config.h"
 
 // Define the Time structure if not included in the library
@@ -27,7 +28,7 @@ struct Time
 };
 
 // Объявление функций
-void displaydraw();          // Функция отрисовки дисплея
+void netstatus();            // Функция отрисовки статуса инетернета
 void accessPoint();          // Функция создания точки доступа
 void handleSubmit();         // Обработчик для маршрута /submit
 void handleRoot();           // Обработчик для главной страницы
@@ -164,19 +165,33 @@ const int num_allowed_chat_ids = sizeof(allowed_chat_ids) / sizeof(allowed_chat_
 // Функция старта бота
 void startTelegramBot()
 {
-  // Установка времени для TLS
-  configTime(0, 0, "pool.ntp.org");
-  secured_client.setTrustAnchors(&cert);
-
-  bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
-  // Устанавливаем команды бота
-  const String commands = F("["
-                            "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
-                            "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
-                            "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
-                            "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
-                            "]");
-  bot.setMyCommands(commands); // Устанавливаем команды для бота
+  static bool start = false;
+  if (start == true)
+  {
+    return;
+  }
+  else if (WiFi.status() == WL_CONNECTED && start == false && millis() > 12000)
+  {
+    Serial.print("Starting bot: ");
+    Serial.println(millis());
+    // Установка времени для TLS
+    configTime(0, 0, "pool.ntp.org");
+    secured_client.setTrustAnchors(&cert);
+    // bot.setMyCommands(F("[]"));
+    // delay(1000);
+    // bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
+    // // Устанавливаем команды бота
+    // const String commands = F("["
+    //                           "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
+    //                           "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
+    //                           "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
+    //                           "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
+    //                           "]");
+    // bot.setMyCommands(commands); // Устанавливаем команды для бота
+    Serial.print("Bot started at: ");
+    Serial.println(millis());
+    start = true;
+  }
 }
 
 bool isChatIdAllowed(const String &chat_id)
@@ -215,7 +230,7 @@ void handleNewMessages(int numNewMessages)
       roomStatus += "Room humidity: " + String(humidity, 1) + "%\n";
       bot.sendMessage(chat_id, roomStatus, "");
     }
-    else if (text == "Пинг" || text == "пинг" || text == "ПИНГ" || text == "/пинг" || text == "/Пинг" || text == "/ПИНГ"|| text =="пінг" || text =="Пінг" || text =="ПІНГ" || text =="/пінг" || text =="/Пінг" || text =="/ПІНГ")
+    else if (text == "Пинг" || text == "пинг" || text == "ПИНГ" || text == "/пинг" || text == "/Пинг" || text == "/ПИНГ" || text == "пінг" || text == "Пінг" || text == "ПІНГ" || text == "/пінг" || text == "/Пінг" || text == "/ПІНГ")
     {
       bot.sendMessage(chat_id, "Понг", "");
     }
@@ -271,7 +286,7 @@ void setup()
   // EEPROM.write(1, 0);
   // EEPROM.commit();
   rtc.Begin();
-  Wire.setClock(100000); // Установка I2C на 100 кГц
+  Wire.setClock(50000); // Установка I2C на 100 кГц
 
   Serial.println("Start");
   // Read the lengths of the SSID and password from EEPROM
@@ -300,13 +315,32 @@ void setup()
 
   // Устанавлием адреса I2C для дисплеев
   display1.setI2CAddress(0x3D * 2); // Для 128x64
-  display2.setI2CAddress(0x3C * 2); // Для 128x32
-  // Инициализируем первый дисплей
-  display1.begin();
+  display2.setI2CAddress(0x3C * 2); // Для 128x64
+                                    // Инициализируем первый дисплей
+
+  if (!display1.begin())
+  {
+    Serial.println("Не удалось инициализировать Дисплей 1");
+    while (1)
+      ;
+  }
+  else
+  {
+    Serial.println("Дисплей 1 инициализирован.");
+  }
   display1.setDrawColor(1); // Установка белого цвета
   display1.clearBuffer();
   // Потом второй дисплей
-  display2.begin();
+  if (!display2.begin())
+  {
+    Serial.println("Не удалось инициализировать Дисплей 2");
+    while (1)
+      ;
+  }
+  else
+  {
+    Serial.println("Дисплей 2 инициализирован.");
+  }
   display2.setDrawColor(1); // Установка белого цвета
   display2.clearBuffer();
 
@@ -364,7 +398,6 @@ void setup()
   }
   display1.sendBuffer();
   display2.sendBuffer();
-  startTelegramBot();
 }
 
 void loop()
@@ -373,13 +406,17 @@ void loop()
   unsigned long currentTime = millis();
   static unsigned long lastUpdateTime1 = 0;
   unsigned long currentTime1 = millis();
-  if (currentTime - lastUpdateTime > 1000)
+  if (currentTime - lastUpdateTime > 500)
   {
     lastUpdateTime = currentTime;
+    startTelegramBot();
     display1.clearBuffer();
     display2.clearBuffer();
-    accessPoint();
-    displaydraw();
+    if (workingACP == 1 && WiFi.status() != WL_CONNECTED)
+    {
+      accessPoint();
+    }
+    netstatus();
     updateClock();
     brightnessControl();
     tempandhum();
@@ -394,23 +431,18 @@ void loop()
     server.handleClient();
     display1.sendBuffer();
     display2.sendBuffer();
-    // Serial.println("workingACP: " + String(workingACP));
   }
-  if (currentTime1 - lastUpdateTime1 > 5)
+  if (currentTime1 - lastUpdateTime1 > 50)
   {
     lastUpdateTime1 = currentTime1;
     accesspointcondition();
-
-    if (digitalRead(button3) == LOW)
-    {
-      Serial.println("Button pressed");
-    }
   }
 }
-// Вывод на дисплеи
-void displaydraw()
+
+void netstatus()
 {
   display1.setFont(u8g2_font_ncenB08_tr);
+
   if (WiFi.status() == WL_CONNECTED && millis() < 8800)
   {
     if (WiFi.status() == WL_CONNECTED)
@@ -418,11 +450,10 @@ void displaydraw()
       display1.drawStr(0, 14, "Connected to WiFi");
       display1.drawStr(0, 28, WiFi.localIP().toString().c_str());
     }
-    // else
-    // {
-    //   display1.setFont(u8g2_font_ncenB08_tr);
-    //   display1.drawStr(16, 14, "Failed to connect");
-    // }
+    else
+    {
+      display1.drawStr(16, 14, "Failed to connect");
+    }
   }
   if (millis() > 9000)
   {
@@ -437,69 +468,86 @@ void displaydraw()
     }
   }
 }
-// Режим точки доступа
+
 void accessPoint()
 {
-  static bool accessPointInitialized = false; // Флаг для отслеживания инициализации точки доступа
+  static bool accessPointInitialized = false;
+  static unsigned long lastClientHandle = 0;
+  static unsigned long lastDisplayUpdate = 0;
 
-  if (workingACP == 1 && !accessPointInitialized)
+  if (workingACP == 0 || WiFi.status() == WL_CONNECTED)
+  {
+    if (accessPointInitialized)
+    {
+      WiFi.softAPdisconnect(true);
+      accessPointInitialized = false;
+      Serial.println("Access Point stopped");
+    }
+    return;
+  }
+
+  if (!accessPointInitialized)
   {
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
+
+    unsigned long startTime = millis();
     WiFi.softAPConfig(local_IP, gateway, subnet);
+    Serial.printf("softAPConfig took: %lu ms\n", millis() - startTime);
+
+    startTime = millis();
     WiFi.softAP(ap_ssid, ap_password);
+    Serial.printf("softAP took: %lu ms\n", millis() - startTime);
+
+    server.on("/", handleRoot);
+    server.on("/submit", HTTP_POST, handleSubmit);
+    server.begin();
+    accessPointInitialized = true;
+
     Serial.println("Access Point started");
     Serial.println("IP Address:");
     Serial.println(WiFi.softAPIP());
-    // Настройка маршрутов
-    server.on("/", handleRoot);
-    server.on("/submit", HTTP_POST, handleSubmit); // Добавляем маршрут /submit
-    server.begin();
-    Serial.println("HTTP server started");
-
-    accessPointInitialized = true; // Устанавливаем флаг, чтобы точка доступа не инициализировалась повторно
-  }
-  else if (workingACP == 0 && accessPointInitialized)
-  {
-    WiFi.softAPdisconnect(true);    // Отключаем точку доступа
-    accessPointInitialized = false; // Сбрасываем флаг инициализации
-    Serial.println("Access Point stopped");
   }
 
-  if (accessPointInitialized)
+  if (millis() - lastClientHandle > 50)
   {
     server.handleClient();
+    lastClientHandle = millis();
   }
-  if (workingACP == 1)
+
+  if (millis() - lastDisplayUpdate > 100)
   {
+    display1.clearBuffer();
+    display2.clearBuffer();
 
     display1.setFont(u8g2_font_ncenB08_tr);
     display1.drawStr(8, 12, "Access Point started");
     display1.setFont(u8g2_font_ncenB12_tr);
     display1.drawStr(4, 28, WiFi.softAPIP().toString().c_str());
-    // Обновляем позицию текста
-    /// Объявляем позицию текста как int для точности при движении
-    static int textPosX1 = 12;                               // Начальная позиция текста
-    const char *scrollText = "Press any button to continue"; // Текст бегущей строки
-    int textWidth = display1.getStrWidth(scrollText);        // Ширина текста
-    int spacing = 64;                                        // Устанавливаем расстояние между строками (меньше текстового пространства)
-    // Обновляем позицию для бегущей строки
-    textPosX1 -= 4; // Скорость движения текста
-    // Если первая строка полностью ушла за левый край экрана
+
+    static int textPosX1 = 12;
+    const char *scrollText = "Press any button to continue";
+    int textWidth = display1.getStrWidth(scrollText);
+    int spacing = 64;
+
+    textPosX1 -= 4;
     if (textPosX1 < -textWidth)
     {
-      textPosX1 += textWidth - spacing; // Смещаем её за вторую строку с учётом уменьшенного расстояния
+      textPosX1 += textWidth - spacing;
     }
-    // Устанавливаем шрифт
+
     display1.setFont(u8g2_font_ncenB08_tr);
-    // Рисуем первую строку на экране
     display1.drawStr(textPosX1, 48, scrollText);
-    // Рисуем вторую строку сразу после первой, с уменьшенным расстоянием между ними
     display1.drawStr(textPosX1 + textWidth - spacing, 48, scrollText);
+
     display2.setFont(u8g2_font_ncenB08_tr);
     display2.drawStr(0, 10, "Connect to WiFi");
     display2.drawStr(0, 20, ("SSID: " + String(ap_ssid)).c_str());
     display2.drawStr(0, 30, ("Password: " + String(ap_password)).c_str());
+
+    display1.sendBuffer();
+    display2.sendBuffer();
+    lastDisplayUpdate = millis();
   }
 }
 
@@ -507,13 +555,20 @@ void accesspointcondition()
 {
   if (WiFi.status() != WL_CONNECTED && workingACP == 1)
   {
-    if (digitalRead(button1) == LOW || digitalRead(button2) == LOW || digitalRead(button3) == LOW)
-    {
-      Serial.println("Button pressed");
-      workingACP = 0;
+    static unsigned long lastButtonPress = 0;
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastButtonPress > 50)
+    { // Устранение дребезга
+      if (digitalRead(button1) == LOW || digitalRead(button2) == LOW || digitalRead(button3) == LOW)
+      {
+        Serial.println("Button pressed");
+        workingACP = 0;
+        lastButtonPress = currentMillis;
+      }
     }
   }
 }
+
 // Объявляем переменные
 unsigned long currentTime = 0;  // Текущее время
 unsigned long lastSyncTime = 0; // Время последней успешной синхронизации
@@ -572,9 +627,9 @@ void updateClock()
 
     // Формируем строку времени в формате HH:MM:SS
     char buffer[20];
-    snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", t.Hour(), t.Minute(), t.Second());
-    display2.clearBuffer();                                  // Очищаем экран перед выводом
-    display2.drawStr((DISPLAY2_WIDTH / 2) - 28, 12, buffer); // Время по центру экрана
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", t.Hour(), t.Minute());
+    // display2.clearBuffer();                                  // Очищаем экран перед выводом
+    display2.drawStr((DISPLAY2_WIDTH / 2) - 14, 12, buffer); // Время по центру экрана
 
     // Получаем название дня недели и месяца
     const char *dayOfWeek = getDayOfWeek(t.Year(), t.Month(), t.Day());
@@ -766,41 +821,37 @@ String weatherjsonget()
 // Вывод погоды на дисплей
 void displayWeather()
 {
+  unsigned long start = millis();
+
   // Парсим JSON-данные
-  DynamicJsonDocument doc(2000);                           // Создаем JSON-документ
-  DeserializationError error = deserializeJson(doc, line); // Десериализуем JSON
+  DynamicJsonDocument doc(1024); // Уменьшен размер документа
+  DeserializationError error = deserializeJson(doc, line);
+
   if (error)
   {
     if (millis() > 9000 && workingACP == 0)
     {
-      // Serial.println("Failed to parse JSON");
       display1.setFont(u8g2_font_unifont_t_symbols);
-      display1.drawUTF8(64, 42, "\u00B0"); // Добавляем символ градуса "°"
+      display1.drawUTF8(64, 42, "\u00B0"); // Градус
       display1.setFont(u8g2_font_ncenB08_tr);
-      display1.drawStr(70, 42, "C"); // Добавляем букву "C" рядом с градусом
-      // Serial.println("Failed to get temperature data");
+      display1.drawStr(70, 42, "C"); // Буква "C"
     }
+    // Serial.println("Failed to parse JSON");
     return;
   }
+  // Serial.printf("JSON parsing took: %lu ms\n", millis() - start);
 
   // Проверяем наличие данных о температуре
   bool hasTemperature = doc["main"]["temp"] != nullptr;
 
-  if (millis() > 9000 && workingACP == 0)
+  if (millis() > 9000 && workingACP == 0 && hasTemperature)
   {
-    if (hasTemperature)
-    {
-      // Получаем данные о погоде
-      float temperature = doc["main"]["temp"]; // Температура
-      String tempStr = "/ " + String(temperature - 273.15, 1);
-      int tempWidth = display1.getStrWidth(tempStr.c_str());
-      display1.setFont(u8g2_font_ncenB08_tr);
-      display1.drawStr(64, 42, tempStr.c_str()); // Температура
-      display1.setFont(u8g2_font_unifont_t_symbols);
-      display1.drawUTF8(64 + tempWidth + 1, 42, "\u00B0"); // Добавляем символ градуса "°"
-      display1.setFont(u8g2_font_ncenB08_tr);
-      display1.drawStr(64 + tempWidth + 6, 42, "C"); // Добавляем букву "C" рядом с градусом
-      // Serial.println("Temperature: " + String(temperature - 273.15, 1) + "°C");
-    }
+    // Получаем данные о погоде
+    float temperature = doc["main"]["temp"];                             // Температура
+    String tempStr = "/ " + String(temperature - 273.15, 1) + "\u00B0C"; // Формируем строку
+    display1.setFont(u8g2_font_ncenB08_tr);
+    display1.drawStr(64, 42, tempStr.c_str()); // Рисуем строку за раз
+
+    // Serial.printf("Display update took: %lu ms\n", millis() - start);
   }
 }
