@@ -10,10 +10,16 @@
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <RtcDS1302.h>
-#include <AHT10.h>
+// #include <AHT10.h>
 #include <iarduino_Pressure_BMP.h>
 #include <UniversalTelegramBot.h>
 #include <ButtonManager.h>
+#include <Adafruit_AHTX0.h>
+// #include <ScioSense_ENS160.h>
+#include <DFRobot_ENS160.h>
+#include <Adafruit_BusIO_Register.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADS1X15.h>
 #include "config.h"
 
 // Define the Time structure if not included in the library
@@ -26,6 +32,7 @@ struct Time
   int min;
   int sec;
 };
+bool showWeather = false; // Флаг для отображения погоды
 
 // Объявление функций
 void netstatus();            // Функция отрисовки статуса инетернета
@@ -43,25 +50,64 @@ String line;                 // Переменная для хранения с�
 void accesspointcondition(); // Функция для проверки условия для включения точки доступа
 void startTelegramBot();     // Функция для запуска бота
 void handleNewMessages(int numNewMessages);
+void showdetailedWeather();
+void sendCommand(String command);
+void esn160_aht21();
+void IRAM_ATTR confirmButtonPressed();
+void handleAction1();
+void handleAction2();
+void handleAction3();
 
 // Объявление дисплеев и датчиков
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // Дисплей 128x64
 U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C display2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // Дисплей 128x32
-AHT10 aht10;                                                                        // Датчик температуры и влажности
 iarduino_Pressure_BMP bmp;                                                          // Датчик давления
 WiFiClientSecure secured_client;
 UniversalTelegramBot bot(BOT_TOKEN, secured_client); // Бот для отправки сообщений в Telegram
+Adafruit_AHTX0 aht21;
+Adafruit_ADS1115 ads;                   // Создаем объект для работы с ADS1115
+DFRobot_ENS160_I2C ens160(&Wire, 0x52); // Указываем адрес I2C (0x53)
 
 // Габариты дисплеев
 #define DISPLAY1_WIDTH 128
 #define DISPLAY1_HEIGHT 64
 #define DISPLAY2_WIDTH 128
 #define DISPLAY2_HEIGHT 32
+#define transistorPin D5  // Пин для управления транзистором
+#define CONFIRM_BUTTON D4 // Прерывание на цифровом пине
+#define ANALOG_PIN A0     // Аналоговый вход
+#define BUZZER_PIN D3     // Пин для подключения пищалки
 
-// Пины для подключения кнопок
-const int button1 = 0;  // D3
-const int button2 = 2;  // D4
-const int button3 = 14; // D5
+const int BTN1_ADC = 1020;
+const int BTN2_ADC = 630;
+const int BTN3_ADC = 330;
+const int TOLERANCE = 100; // Увеличил допуск
+
+// Флаги событий кнопок
+volatile bool isButtonPressed[3] = {false, false, false};
+
+volatile int lastButton = -1;
+volatile unsigned long lastPressTime = 0;
+const unsigned long doublePressThreshold = 300; // Время для двойного нажатия (мс)
+
+// Прерывание: фиксируем выбор кнопки
+void IRAM_ATTR confirmButtonPressed()
+{
+  int adcValue = analogRead(ANALOG_PIN);
+
+  if (abs(adcValue - BTN1_ADC) <= TOLERANCE)
+  {
+    isButtonPressed[0] = true;
+  }
+  else if (abs(adcValue - BTN2_ADC) <= TOLERANCE)
+  {
+    isButtonPressed[1] = true;
+  }
+  else if (abs(adcValue - BTN3_ADC) <= TOLERANCE)
+  {
+    isButtonPressed[2] = true;
+  }
+}
 // Пины для подключения DS1302
 const int RST_PIN = 15;
 const int DAT_PIN = 13;
@@ -73,6 +119,7 @@ RtcDS1302<ThreeWire> rtc(myWire);
 // Переменные для хранения Wi-Fi точки доступа
 const char *ap_ssid = "ESP8266";
 const char *ap_password = "12345679";
+const String serverUrl = "http://192.168.0.10:8000/command"; // Замените на IP вашего ПК
 static bool workingACP = 0;
 unsigned long lastTimeBotRan;
 
@@ -165,6 +212,7 @@ const int num_allowed_chat_ids = sizeof(allowed_chat_ids) / sizeof(allowed_chat_
 // Функция старта бота
 void startTelegramBot()
 {
+
   static bool start = false;
   if (start == true)
   {
@@ -178,16 +226,16 @@ void startTelegramBot()
     configTime(0, 0, "pool.ntp.org");
     secured_client.setTrustAnchors(&cert);
     // bot.setMyCommands(F("[]"));
-    // delay(1000);
-    // bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
-    // // Устанавливаем команды бота
-    // const String commands = F("["
-    //                           "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
-    //                           "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
-    //                           "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
-    //                           "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
-    //                           "]");
-    // bot.setMyCommands(commands); // Устанавливаем команды для бота
+    delay(1000);
+    bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
+    // Устанавливаем команды бота
+    const String commands = F("["
+                              "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
+                              "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
+                              "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
+                              "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
+                              "]");
+    bot.setMyCommands(commands); // Устанавливаем команды для бота
     Serial.print("Bot started at: ");
     Serial.println(millis());
     start = true;
@@ -224,10 +272,12 @@ void handleNewMessages(int numNewMessages)
     }
     else if (text == "/RoomStatus")
     {
-      float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
-      float humidity = aht10.readHumidity();       // Read humidity from AHT10 sensor
+      sensors_event_t humidity, temp;
+      aht21.getEvent(&humidity, &temp);
+      float temperature = temp.temperature;             // Read temperature from AHT21 sensor
+      float humidityValue = humidity.relative_humidity; // Read humidity from AHT21 sensor
       String roomStatus = "Room temperature: " + String(temperature, 1) + "°C\n";
-      roomStatus += "Room humidity: " + String(humidity, 1) + "%\n";
+      roomStatus += "Room humidity: " + String(humidityValue, 1) + "%\n";
       bot.sendMessage(chat_id, roomStatus, "");
     }
     else if (text == "Пинг" || text == "пинг" || text == "ПИНГ" || text == "/пинг" || text == "/Пинг" || text == "/ПИНГ" || text == "пінг" || text == "Пінг" || text == "ПІНГ" || text == "/пінг" || text == "/Пінг" || text == "/ПІНГ")
@@ -257,10 +307,12 @@ void handleNewMessages(int numNewMessages)
       if (text == "/test1")
       {
         bot.sendMessage(chat_id, "Just test1", "");
+        sendCommand("notepad");
       }
       else if (text == "/test2")
       {
         bot.sendMessage(chat_id, "Just test2", "");
+        sendCommand("mute_mic");
       }
       else if (text == "/test3")
       {
@@ -276,15 +328,15 @@ void handleNewMessages(int numNewMessages)
 // Стартовая функция
 void setup()
 {
-  pinMode(button1, INPUT_PULLUP);
-  pinMode(button2, INPUT_PULLUP);
-  pinMode(button3, INPUT_PULLUP);
+  pinMode(transistorPin, OUTPUT);   // Настроим пин как выход
+  digitalWrite(transistorPin, LOW); // Включаем транзистор (LOW замыкает транзистор)
+  pinMode(CONFIRM_BUTTON, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(CONFIRM_BUTTON), confirmButtonPressed, FALLING);
+
   int failedAttemps = 0;
   Serial.begin(9600);
   EEPROM.begin(512);
-  // EEPROM.write(0, 0);
-  // EEPROM.write(1, 0);
-  // EEPROM.commit();
   rtc.Begin();
   Wire.setClock(50000); // Установка I2C на 100 кГц
 
@@ -316,8 +368,8 @@ void setup()
   // Устанавлием адреса I2C для дисплеев
   display1.setI2CAddress(0x3D * 2); // Для 128x64
   display2.setI2CAddress(0x3C * 2); // Для 128x64
-                                    // Инициализируем первый дисплей
 
+  // Инициализируем первый дисплей
   if (!display1.begin())
   {
     Serial.println("Не удалось инициализировать Дисплей 1");
@@ -330,6 +382,7 @@ void setup()
   }
   display1.setDrawColor(1); // Установка белого цвета
   display1.clearBuffer();
+
   // Потом второй дисплей
   if (!display2.begin())
   {
@@ -376,17 +429,15 @@ void setup()
     Serial.println("Connected to WiFi");
     Serial.println(WiFi.localIP());
   }
-  // Инициализация датчика AHT10
-  if (!aht10.begin())
+  // Инициализация AHT21
+  if (!aht21.begin())
   {
-    Serial.println("Не удалось инициализировать датчик AHT10!");
+    Serial.println("Не удалось инициализировать датчик AHT21!");
     while (1)
-      ;
+      ; // Ожидаем, пока не будет подключен
   }
-  else
-  {
-    Serial.println("Датчик AHT10 инициализирован.");
-  }
+  Serial.println("Датчик AHT21 инициализирован.");
+
   // Инициализация датчика BMP
   if (!bmp.begin())
   {
@@ -396,16 +447,39 @@ void setup()
   {
     Serial.println("Датчик BMP инициализирован.");
   }
+
+  // Инициализация модуля ADS1115
+  if (!ads.begin())
+  {
+    Serial.println("Не удалось найти ADS1115. Проверьте соединения!");
+    while (1)
+      ;
+  }
+  Serial.println("ADS1115 успешно инициализирован.");
+
+  delay(100);
+
+  if (!ens160.begin())
+  {
+    Serial.println("Не вдалося ініціалізувати ENS160. Перевірте підключення.");
+    while (1)
+      ;
+  }
+  Serial.println("Датчик ENS160 инициализирован.");
+  ens160.setPWRMode(ENS160_STANDARD_MODE); // Убедитесь, что датчик включен в нормальный режим работы
+
   display1.sendBuffer();
   display2.sendBuffer();
 }
-
 void loop()
 {
-  static unsigned long lastUpdateTime = 0;
   unsigned long currentTime = millis();
-  static unsigned long lastUpdateTime1 = 0;
-  unsigned long currentTime1 = millis();
+  static unsigned long lastUpdateTime = 0;
+
+  handleAction1();
+  handleAction2();
+  handleAction3();
+
   if (currentTime - lastUpdateTime > 500)
   {
     lastUpdateTime = currentTime;
@@ -421,6 +495,7 @@ void loop()
     brightnessControl();
     tempandhum();
     weather();
+    esn160_aht21(); // Функция получения данных
     displayWeather();
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     while (numNewMessages)
@@ -429,13 +504,9 @@ void loop()
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     server.handleClient();
+    showdetailedWeather();
     display1.sendBuffer();
     display2.sendBuffer();
-  }
-  if (currentTime1 - lastUpdateTime1 > 50)
-  {
-    lastUpdateTime1 = currentTime1;
-    accesspointcondition();
   }
 }
 
@@ -458,13 +529,13 @@ void netstatus()
   if (millis() > 9000)
   {
     display1.setFont(u8g2_font_unifont_t_symbols);
-    if (WiFi.status() == WL_CONNECTED)
+    if (WiFi.status() == WL_CONNECTED && workingACP == 0 && showWeather == 0)
     {
-      display1.drawUTF8(98, 20, "\u2714"); // Использование символа галочки
+      display1.drawUTF8(98, 24, "\u2714"); // Использование символа галочки
     }
-    if (WiFi.status() != WL_CONNECTED && workingACP == 0)
+    if (WiFi.status() != WL_CONNECTED && workingACP == 0 && showWeather == 0)
     {
-      display1.drawUTF8(98, 20, "\u2718"); // Использование символа крестика
+      display1.drawUTF8(98, 24, "\u2718"); // Использование символа крестика
     }
   }
 }
@@ -548,24 +619,6 @@ void accessPoint()
     display1.sendBuffer();
     display2.sendBuffer();
     lastDisplayUpdate = millis();
-  }
-}
-
-void accesspointcondition()
-{
-  if (WiFi.status() != WL_CONNECTED && workingACP == 1)
-  {
-    static unsigned long lastButtonPress = 0;
-    unsigned long currentMillis = millis();
-    if (currentMillis - lastButtonPress > 50)
-    { // Устранение дребезга
-      if (digitalRead(button1) == LOW || digitalRead(button2) == LOW || digitalRead(button3) == LOW)
-      {
-        Serial.println("Button pressed");
-        workingACP = 0;
-        lastButtonPress = currentMillis;
-      }
-    }
   }
 }
 
@@ -662,7 +715,7 @@ void syncTimeWithAPI()
   if (httpCode == HTTP_CODE_OK)
   {
     String payload = http.getString(); // Получаем ответ API
-    DynamicJsonDocument doc(1024);     // Создаем JSON-документ
+    DynamicJsonDocument doc(512);      // Создаем JSON-документ
     deserializeJson(doc, payload);     // Десериализуем JSON
 
     const char *datetime = doc["datetime"]; // Получаем строку с датой и временем
@@ -693,24 +746,47 @@ void syncTimeWithAPI()
 }
 
 // Яркость дисплеев
+
+#define NUM_SAMPLES 10
+float VoutBuffer[NUM_SAMPLES] = {0};
+int sampleIndex = 0;
+
 void brightnessControl()
 {
-  const int analogPin = A0; // Пин, к которому подключен фоторезистор
-  const float R2 = 10000.0; // Резистор 10 кОм
-  const float Vin = 3.3;    // Напряжение питания 3.3В
+  int16_t analogValue = ads.readADC_SingleEnded(0); // Канал 0
+  const float R2 = 10000.0;                         // Резистор 10 кОм
+  const float Vin = 3.3;                            // Напряжение питания 3.3 В
 
-  float Vout = analogRead(analogPin) * (Vin / 1024.0); // Преобразование в напряжение (0-3.3В)
+  // Преобразование в напряжение
+  float Vout = analogValue * (Vin / 32768.0); // Для ADS1115 (±6.144 В диапазон)
+  if (Vout <= 0)
+    Vout = 0.01; // Предотвращаем деление на ноль
 
-  // Рассчитаем сопротивление фоторезистора
-  float R1 = (R2 * (Vin - Vout)) / Vout; // Сопротивление фоторезистора
+  // Расчёт сопротивления
+  float R1 = (R2 * (Vin - Vout)) / Vout;
 
-  // Масштабируем значение для яркости дисплея
-  int brightness1 = map(R1, 0, 34000, 255, 50);   // Изменить минимальное и максимальное значения для первого дисплея
-  brightness1 = constrain(brightness1, 100, 255); // Ограничиваем значение яркости в диапазоне 50-255
+  // Вывод данных для отладки
+  // Serial.print("Vout: ");
+  // Serial.println(Vout);
+  // Serial.print("R1: ");
+  // Serial.println(R1);
 
-  int brightness2 = map(R1, 8000, 20000, 255, 0); // Изменить минимальное и максимальное значения для второго дисплея
-  brightness2 = constrain(brightness2, 0, 200);   // Ограничиваем значение яркости в диапазоне 0-255
+  // Масштабируем яркость
+  // Первый дисплей (для большого диапазона сопротивлений)
+  int brightness1 = map(R1, 50000, 600000, 255, 50);
+  brightness1 = constrain(brightness1, 50, 255); // Ограничиваем диапазон
 
+  // Второй дисплей (для более узкого диапазона)
+  int brightness2 = map(R1, 50000, 300000, 255, 0);
+  brightness2 = constrain(brightness2, 0, 255); // Ограничиваем диапазон
+
+  // Вывод для отладки
+  // Serial.print("Brightness1: ");
+  // Serial.println(brightness1);
+  // Serial.print("Brightness2: ");
+  // Serial.println(brightness2);
+
+  // Применяем яркость
   display1.setContrast(brightness1);
   display2.setContrast(brightness2);
 }
@@ -718,19 +794,19 @@ void brightnessControl()
 // Получение температуры и влажности
 void tempandhum()
 {
-  float temperature = aht10.readTemperature(); // Read temperature from AHT10 sensor
-  float humidity = aht10.readHumidity();       // Read humidity from AHT10 sensor
+  sensors_event_t humidityEvent, tempEvent;
+  aht21.getEvent(&humidityEvent, &tempEvent);
+  float temperature = tempEvent.temperature;        // Read temperature from AHT21 sensor
+  float humidity = humidityEvent.relative_humidity; // Read humidity from AHT21 sensor
   float pressure = bmp.pressure;
   temperature = bmp.temperature;
-  if (millis() > 9000 && workingACP == 0)
+  if (millis() > 9000 && workingACP == 0 && showWeather == 0)
   {
-    // Calculate average temperature from AHT10 and BMP sensors
-    float avgTemperature = aht10.readTemperature();
     // Prepare strings for display
     char tempStr[10];
     char humStr[10];
     char pressureStr[10];
-    snprintf(tempStr, sizeof(tempStr), "%.1f", avgTemperature);
+    snprintf(tempStr, sizeof(tempStr), "%.1f", temperature); // Convert temperature to string
     snprintf(humStr, sizeof(humStr), "%.1f", humidity);
     snprintf(pressureStr, sizeof(pressureStr), "%.1f", pressure); // Convert pressure to hPa
 
@@ -741,7 +817,7 @@ void tempandhum()
     display1.drawStr(0, 10, "Pres:");
     int pressureWidth = display1.getStrWidth(pressureStr); // Вычисляем ширину строки с давлением
     display1.drawStr(40, 10, pressureStr);                 // Давление
-    display1.drawStr(44 + pressureWidth + 1, 10, "hPa");   // Добавляем единицу измерения давления "hPa"
+    display1.drawStr(44 + pressureWidth + 1, 10, "mmHg");  // Добавляем единицу измерения давления "hPa"
 
     // Display humidity
     display1.drawStr(0, 26, "Hum:");
@@ -774,10 +850,11 @@ void weather()
   DeserializationError error = deserializeJson(doc, line); // скармиваем String
   if (error)
   {
-    // Serial.println("deserializeJson() failed"); // если ошибка, сообщаем об этом
-    return; // и запускаем заного
+    Serial.println("Get weather data failed"); // если ошибка, сообщаем об этом
+    return;                                    // и запускаем заного
   }
 }
+
 String weatherjsonget()
 {
   static unsigned long lastWeatherUpdateTime = 0;
@@ -818,18 +895,70 @@ String weatherjsonget()
   return line;
 }
 
+void showdetailedWeather()
+{
+  static unsigned long startMillis = 0; // Начальное время
+  const unsigned long interval = 10000; // Интервал в миллисекундах (10 секунд)
+  static bool parsed = false;           // Флаг парсинга
+  static String weather;                // Данные погоды
+  static float windSpeed = 0, humidity = 0, pressure_mmHg = 0;
+
+  if (showWeather == 1)
+  {
+    // Парсинг JSON только один раз при начале отображения
+    if (!parsed)
+    {
+      static DynamicJsonDocument doc(512);
+      DeserializationError error = deserializeJson(doc, line);
+      if (error)
+      {
+        Serial.println("Ошибка разбора JSON");
+        return;
+      }
+
+      // Извлечение данных о погоде
+      weather = doc["weather"][0]["description"].as<String>();
+      windSpeed = doc["wind"]["speed"].as<float>(); // Получение скорости ветра
+      humidity = doc["main"]["humidity"].as<float>();
+      float pressure_hPa = doc["main"]["pressure"].as<float>();
+      pressure_mmHg = pressure_hPa * 0.75006; // Преобразование давления в мм рт. ст.
+
+      startMillis = millis(); // Запуск таймера
+      parsed = true;          // Флаг парсинга установлен
+    }
+
+    // Отображение данных на дисплее
+    display1.clearBuffer();
+    display1.setFont(u8g2_font_ncenB08_tr);
+    display1.drawStr(0, 10, "Weather:");
+    display1.drawStr(0, 20, weather.c_str());
+    display1.drawStr(0, 30, ("Wind: " + String(windSpeed, 1) + " m/s").c_str());
+    display1.drawStr(0, 40, ("Hum: " + String(humidity, 1) + " %").c_str());
+    display1.drawStr(0, 50, ("Press: " + String(pressure_mmHg, 1) + " mmHg").c_str());
+    display1.sendBuffer();
+
+    // Проверка окончания интервала
+    if (millis() - startMillis >= interval)
+    {
+      Serial.println("Таймер завершён!");
+      showWeather = 0; // Отключение показа
+      parsed = false;  // Сброс для следующего отображения
+    }
+  }
+}
+
 // Вывод погоды на дисплей
 void displayWeather()
 {
   unsigned long start = millis();
 
   // Парсим JSON-данные
-  DynamicJsonDocument doc(1024); // Уменьшен размер документа
+  DynamicJsonDocument doc(512); // Уменьшен размер документа
   DeserializationError error = deserializeJson(doc, line);
 
   if (error)
   {
-    if (millis() > 9000 && workingACP == 0)
+    if (millis() > 9000 && workingACP == 0 && showWeather == 0)
     {
       display1.setFont(u8g2_font_unifont_t_symbols);
       display1.drawUTF8(64, 42, "\u00B0"); // Градус
@@ -844,14 +973,141 @@ void displayWeather()
   // Проверяем наличие данных о температуре
   bool hasTemperature = doc["main"]["temp"] != nullptr;
 
-  if (millis() > 9000 && workingACP == 0 && hasTemperature)
+  if (millis() > 9000 && workingACP == 0 && hasTemperature && showWeather == 0)
   {
     // Получаем данные о погоде
-    float temperature = doc["main"]["temp"];                             // Температура
+    float temperature = doc["main"]["temp"]; // Температура
+    String weather = doc["weather"][0]["description"];
     String tempStr = "/ " + String(temperature - 273.15, 1) + "\u00B0C"; // Формируем строку
+                                                                         // Формируем строку
     display1.setFont(u8g2_font_ncenB08_tr);
-    display1.drawStr(64, 42, tempStr.c_str()); // Рисуем строку за раз
-
+    display1.drawStr(64, 42, tempStr.c_str());
+    display1.setFont(u8g2_font_ncenB10_tr); // Увеличиваем шрифт
+    int weatherWidth = display1.getStrWidth(weather.c_str());
+    int weatherX = (DISPLAY1_WIDTH - weatherWidth) / 2;
+    display1.drawStr(weatherX, 58, weather.c_str()); // Выводим текст по центру экрана
     // Serial.printf("Display update took: %lu ms\n", millis() - start);
+  }
+}
+
+void sendCommand(String command)
+{
+  HTTPClient http;
+  WiFiClient client;
+  http.begin(client, serverUrl);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  // Формируем данные для отправки
+  String postData = "command=" + command;
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode > 0)
+  {
+    Serial.printf("Response code: %d\n", httpResponseCode);
+    String response = http.getString();
+    Serial.println(response);
+  }
+  else
+  {
+    Serial.printf("Error on sending POST: %s\n", http.errorToString(httpResponseCode).c_str());
+  }
+
+  http.end();
+}
+
+void esn160_aht21()
+{
+  // Получаем данные с AHT21
+  sensors_event_t humidity, temp;
+  aht21.getEvent(&humidity, &temp);
+
+  // Выводим данные с AHT21
+  // Serial.println(F("Данные с AHT21:"));
+  // Serial.print(F("Температура: "));
+  // Serial.print(temp.temperature);
+  // Serial.println(F(" °C"));
+
+  // Serial.print(F("Влажность: "));
+  // Serial.print(humidity.relative_humidity);
+  // Serial.println(F(" %"));
+
+  // Устанавливаем мощность в обычный режим для работы с данными
+  ens160.setPWRMode(ENS160_STANDARD_MODE);
+
+  // Устанавливаем данные о температуре и влажности для компенсации
+  ens160.setTempAndHum(temp.temperature, humidity.relative_humidity);
+
+  // Получаем CO2 эквивалент и VOC
+  uint16_t eco2 = ens160.getECO2(); // CO2 эквивалент
+  uint16_t tvoc = ens160.getTVOC(); // TVOC эквивалент
+
+  // Выводим данные с ENS160
+  // Serial.println(F("Данные с ENS160:"));
+  // Serial.print(F("CO2 эквивалент: "));
+  // Serial.print(eco2);
+  // Serial.println(F(" ppm"));
+
+  // Serial.print(F("VOC эквивалент: "));
+  // Serial.print(tvoc);
+  // Serial.println(F(" ppb"));
+
+  // Serial.println(F("-----------------------------"));
+}
+
+void handleAction1()
+{
+  if ((isButtonPressed[0]) && WiFi.status() != WL_CONNECTED && workingACP == 1)
+  {
+    workingACP = 0;
+    isButtonPressed[0] = false;
+  }
+  if (isButtonPressed[0] && workingACP == 0)
+  {
+    Serial.println("Кнопка 1:Нажата");
+    showWeather = 1;
+    showdetailedWeather();
+    tone(BUZZER_PIN, 1000, 300);
+
+    isButtonPressed[0] = false;
+  }
+}
+
+void handleAction2()
+{
+  const unsigned long pressDuration = 1000; // Задержка 1 секунда для включения транзистора
+  if ((isButtonPressed[1]) && WiFi.status() != WL_CONNECTED && workingACP == 1)
+  {
+    workingACP = 0;
+    isButtonPressed[1] = false;
+  }
+  if (isButtonPressed[1] && workingACP == 0)
+  {
+    Serial.println("Кнопка 2:Нажата");
+    digitalWrite(transistorPin, HIGH);
+    delay(pressDuration);
+    digitalWrite(transistorPin, LOW);
+    tone(BUZZER_PIN, 500, 150);
+    delay(50);
+    tone(BUZZER_PIN, 500, 150);
+    isButtonPressed[1] = false;
+  }
+}
+
+void handleAction3()
+{
+  if ((isButtonPressed[2]) && WiFi.status() != WL_CONNECTED && workingACP == 1)
+  {
+    workingACP = 0;
+    isButtonPressed[2] = false;
+  }
+  if (isButtonPressed[2] && workingACP == 0)
+  {
+    Serial.println("Кнопка 3:Нажата");
+    tone(BUZZER_PIN, 200, 100);
+    delay(50);
+    tone(BUZZER_PIN, 200, 100);
+    delay(50);
+    tone(BUZZER_PIN, 200, 100);
+    isButtonPressed[2] = false;
   }
 }
