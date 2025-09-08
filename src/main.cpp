@@ -32,31 +32,31 @@ struct Time
   int min;
   int sec;
 };
-bool showWeather = false; // Флаг для отображения погоды
+bool showWeather = false; // Flag to indicate detailed weather display
 
-// Объявление функций
-void netstatus();            // Функция отрисовки статуса инетернета
-void accessPoint();          // Функция создания точки доступа
-void handleSubmit();         // Обработчик для маршрута /submit
-void handleRoot();           // Обработчик для главной страницы
-void updateClock();          // Функция обновления времени
-void syncTimeWithAPI();      // Функция синхронизации времени с API
-void brightnessControl();    // Функция управления яркостью дисплеев
-void tempandhum();           // Функция получения температуры и влажности
-void weather();              // Функция получения погоды
-String weatherjsonget();     // Функция получения погоды в формате JSON
-void displayWeather();       // Функция отображения погоды на дисплее
-String line;                 // Переменная для хранения строки
-void accesspointcondition(); // Функция для проверки условия для включения точки доступа
-void startTelegramBot();     // Функция для запуска бота
-void handleNewMessages(int numNewMessages);
-void showdetailedWeather();
-void sendCommand(String command);
-void esn160_aht21();
-void IRAM_ATTR confirmButtonPressed();
-void handleAction1();
-void handleAction2();
-void handleAction3();
+// Function declarations
+void netstatus();                           // Draw network status
+void accessPoint();                         // Create Wi-Fi access point and webserver
+void handleSubmit();                        // Handler for /submit route
+void handleRoot();                          // Handler for root (WiFi setup) page
+void updateClock();                         // Update clock (RTC + NTP sync)
+void syncTimeWithAPI();                     // Sync time using online API
+void brightnessControl();                   // Control display brightness using ADC
+void tempandhum();                          // Read temperature and humidity sensors
+void weather();                             // Fetch weather data
+String weatherjsonget();                    // Get weather JSON string
+void displayWeather();                      // Render weather on the display
+String line;                                // Buffer for incoming JSON/HTTP lines
+void accesspointcondition();                // Check conditions to enable access point
+void startTelegramBot();                    // Initialize Telegram bot when WiFi available
+void handleNewMessages(int numNewMessages); // Process Telegram messages
+void showdetailedWeather();                 // Show detailed weather screen
+void sendCommand(String command);           // Send command to configured server
+void esn160_aht21();                        // Read ENS160 + AHT21 sensors and compensate
+void IRAM_ATTR confirmButtonPressed();      // ISR for button press
+void handleAction1();                       // Handle virtual button 1 actions
+void handleAction2();                       // Handle virtual button 2 actions
+void handleAction3();                       // Handle virtual button 3 actions
 
 // Объявление дисплеев и датчиков
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C display1(U8G2_R0, /* reset=*/U8X8_PIN_NONE);    // Дисплей 128x64
@@ -68,7 +68,16 @@ Adafruit_AHTX0 aht21;
 Adafruit_ADS1115 ads;                   // Создаем объект для работы с ADS1115
 DFRobot_ENS160_I2C ens160(&Wire, 0x52); // Указываем адрес I2C (0x53)
 
-// Габариты дисплеев
+#define DISPLAY1_WIDTH 128
+#define DISPLAY1_HEIGHT 64
+#define DISPLAY2_WIDTH 128
+#define DISPLAY2_HEIGHT 32
+#define transistorPin D5  // Pin to control transistor
+#define CONFIRM_BUTTON D4 // Interrupt pin for confirmation button
+#define ANALOG_PIN A0     // Analog input pin for button matrix
+#define BUZZER_PIN D3     // Buzzer pin
+
+// Display dimensions
 #define DISPLAY1_WIDTH 128
 #define DISPLAY1_HEIGHT 64
 #define DISPLAY2_WIDTH 128
@@ -81,16 +90,16 @@ DFRobot_ENS160_I2C ens160(&Wire, 0x52); // Указываем адрес I2C (0x
 const int BTN1_ADC = 1020;
 const int BTN2_ADC = 630;
 const int BTN3_ADC = 330;
-const int TOLERANCE = 100; // Увеличил допуск
+const int TOLERANCE = 100; // Increased tolerance for ADC button readings
 
-// Флаги событий кнопок
+// Button event flags
 volatile bool isButtonPressed[3] = {false, false, false};
 
 volatile int lastButton = -1;
 volatile unsigned long lastPressTime = 0;
-const unsigned long doublePressThreshold = 300; // Время для двойного нажатия (мс)
+const unsigned long doublePressThreshold = 300; // Threshold for double press (ms)
 
-// Прерывание: фиксируем выбор кнопки
+// ISR: read ADC and set corresponding button flag
 void IRAM_ATTR confirmButtonPressed()
 {
   int adcValue = analogRead(ANALOG_PIN);
@@ -108,27 +117,27 @@ void IRAM_ATTR confirmButtonPressed()
     isButtonPressed[2] = true;
   }
 }
-// Пины для подключения DS1302
+// Pins for DS1302 RTC
 const int RST_PIN = 15;
 const int DAT_PIN = 13;
 const int CLK_PIN = 12;
-// Создание объекта ThreeWire и DS1302
+// Create ThreeWire and DS1302 RTC objects
 ThreeWire myWire(DAT_PIN, CLK_PIN, RST_PIN);
 RtcDS1302<ThreeWire> rtc(myWire);
 
-// Переменные для хранения Wi-Fi точки доступа
+// Wi-Fi access point settings
 const char *ap_ssid = "ESP8266";
 const char *ap_password = "12345679";
-const String serverUrl = "http://192.168.0.10:8000/command"; // Замените на IP вашего ПК
+const String serverUrl = "http://192.168.0.10:8000/command"; // Replace with your PC IP if needed
 static bool workingACP = 0;
 unsigned long lastTimeBotRan;
 
-// Данные для подключения к интернету
+// Networking and NTP
 ESP8266WebServer server(80);
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // 0 - смещение по времени (в секундах), 60000 - интервал обновления (в миллисекундах)
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000); // timezone offset = 0s, update interval = 60000ms
 
-// Обработчик для главной страницы
+// HTTP handler for the root page (WiFi setup)
 void handleRoot()
 {
   String html = "<!DOCTYPE html><html><head><title>WiFi Setup</title>";
@@ -148,7 +157,7 @@ void handleRoot()
   html += "</form></div></body></html>";
   server.send(200, "text/html", html);
 }
-// Обработчик для маршрута /submit
+// HTTP handler for POST /submit — save WiFi credentials to EEPROM and restart
 void handleSubmit()
 {
   EEPROM.begin(512);
@@ -201,7 +210,7 @@ void handleSubmit()
   }
 }
 
-// Настройки статического IP
+// Static IP configuration
 IPAddress local_IP(192, 168, 0, 105);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -209,7 +218,7 @@ X509List cert(TELEGRAM_CERTIFICATE_ROOT);
 const String allowed_chat_ids[] = {CHAT_ID, CHAT_ID_1};
 const int num_allowed_chat_ids = sizeof(allowed_chat_ids) / sizeof(allowed_chat_ids[0]);
 
-// Функция старта бота
+// Start the Telegram bot when WiFi is ready
 void startTelegramBot()
 {
 
@@ -222,20 +231,20 @@ void startTelegramBot()
   {
     Serial.print("Starting bot: ");
     Serial.println(millis());
-    // Установка времени для TLS
+    // Set system time for TLS
     configTime(0, 0, "pool.ntp.org");
     secured_client.setTrustAnchors(&cert);
     // bot.setMyCommands(F("[]"));
     delay(1000);
     bot.sendMessage(allowed_chat_ids[0], "Bot is online and ready! Press /start to continue", "");
-    // Устанавливаем команды бота
+    // Register bot commands
     const String commands = F("["
                               "{\"command\":\"RoomStatus\", \"description\":\"Room temp and hum\"},"
                               "{\"command\":\"test1\", \"description\":\"Send Pc sleep\"},"
                               "{\"command\":\"test2\", \"description\":\"Turn on/off\"},"
                               "{\"command\":\"test3\", \"description\":\"Get humidity\"}"
                               "]");
-    bot.setMyCommands(commands); // Устанавливаем команды для бота
+    bot.setMyCommands(commands); // Set bot commands
     Serial.print("Bot started at: ");
     Serial.println(millis());
     start = true;
@@ -253,7 +262,7 @@ bool isChatIdAllowed(const String &chat_id)
   }
   return false;
 }
-// Функция для обработки новых сообщений
+// Process incoming Telegram messages
 void handleNewMessages(int numNewMessages)
 {
   for (int i = 0; i < numNewMessages; i++)
@@ -325,11 +334,12 @@ void handleNewMessages(int numNewMessages)
     }
   }
 }
-// Стартовая функция
+// Main setup
 void setup()
 {
-  pinMode(transistorPin, OUTPUT);   // Настроим пин как выход
-  digitalWrite(transistorPin, LOW); // Включаем транзистор (LOW замыкает транзистор)
+
+  pinMode(transistorPin, OUTPUT);   // Configure transistor control pin as output
+  digitalWrite(transistorPin, LOW); // Drive transistor off (LOW)
   pinMode(CONFIRM_BUTTON, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
   attachInterrupt(digitalPinToInterrupt(CONFIRM_BUTTON), confirmButtonPressed, FALLING);
@@ -338,10 +348,10 @@ void setup()
   Serial.begin(9600);
   EEPROM.begin(512);
   rtc.Begin();
-  Wire.setClock(50000); // Установка I2C на 100 кГц
+  Wire.setClock(50000); // Set I2C speed to 50 kHz
 
   Serial.println("Start");
-  // Read the lengths of the SSID and password from EEPROM
+  // Read stored SSID and password lengths from EEPROM
   int ssidLength = EEPROM.read(0);
   int passwordLength = EEPROM.read(1);
 
@@ -362,41 +372,40 @@ void setup()
   Serial.println("Stored SSID:" + storedSSID);
   Serial.println("Stored Password:" + storedPassword);
 
-  // Подключение к Wi-Fi по сохраненным данным
+  // Connect to Wi-Fi using stored credentials
   WiFi.begin(storedSSID.c_str(), storedPassword.c_str());
 
-  // Устанавлием адреса I2C для дисплеев
-  display1.setI2CAddress(0x3D * 2); // Для 128x64
-  display2.setI2CAddress(0x3C * 2); // Для 128x64
+  // Set I2C addresses for the displays
+  display1.setI2CAddress(0x3D * 2); // For 128x64
+  display2.setI2CAddress(0x3C * 2); // For 128x32
 
-  // Инициализируем первый дисплей
+  // Initialize first display
   if (!display1.begin())
   {
-    Serial.println("Не удалось инициализировать Дисплей 1");
+    Serial.println("Failed to initialize Display 1");
     while (1)
       ;
   }
   else
   {
-    Serial.println("Дисплей 1 инициализирован.");
+    Serial.println("Display 1 initialized.");
   }
-  display1.setDrawColor(1); // Установка белого цвета
+  display1.setDrawColor(1); // Set drawing color (white)
   display1.clearBuffer();
 
-  // Потом второй дисплей
+  // Initialize second display
   if (!display2.begin())
   {
-    Serial.println("Не удалось инициализировать Дисплей 2");
+    Serial.println("Failed to initialize Display 2");
     while (1)
       ;
   }
   else
   {
-    Serial.println("Дисплей 2 инициализирован.");
+    Serial.println("Display 2 initialized.");
   }
-  display2.setDrawColor(1); // Установка белого цвета
+  display2.setDrawColor(1); // Set drawing color (white)
   display2.clearBuffer();
-
   // Установка статического IP
   if (!WiFi.config(local_IP, gateway, subnet))
   {
@@ -471,6 +480,7 @@ void setup()
   display1.sendBuffer();
   display2.sendBuffer();
 }
+
 void loop()
 {
   unsigned long currentTime = millis();

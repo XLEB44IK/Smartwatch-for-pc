@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   build:
@@ -16,10 +16,17 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install PlatformIO
-        run: python -m pip install --upgrade pip && pip install -U platformio
-
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U platformio
       - name: Build (PlatformIO)
-        run: pio run -e esp8266
+        run: python -m platformio run -e esp8266
+      - name: Upload build artifact (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pio-build
+          path: .pio/build/esp8266/firmware.bin

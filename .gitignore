@@ -5,3 +5,15 @@
 .vscode/ipch
 .env
 src/config.h
+# PlatformIO build output
+.pio/
+build/
+
+# Private configuration (example: API keys, bot tokens)
+/src/config_private.h
+/src/config_local_backup.h
+
+# General
+.DS_Store
+Thumbs.db
+*.log
